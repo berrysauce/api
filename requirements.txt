@@ -1,0 +1,7 @@
+uvicorn
+fastapi
+boto3
+python-multipart
+python-dotenv
+pymongo[srv]
+fastapi-sso

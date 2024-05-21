@@ -2,6 +2,10 @@ import { Hono, Context } from "hono"
 import { authHandler, initAuthConfig, verifyAuth, type AuthConfig } from "@hono/auth-js"
 import GitHub from "@auth/core/providers/github"
 
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { unzipper } from "unzipper";
+import * as fs from 'fs';
+
 type Bindings = {
   DOMAINS_KV: KVNamespace,
   OAUTH_SECRET: string,
@@ -44,6 +48,31 @@ app.get("/", async (c) => {
 
 app.get("/api/kv", async (c, next) => {
   return c.newResponse(await c.env.DOMAINS_KV.get("stowage.stowage.dev"))
+})
+
+app.post("/api/deploy", async (c) => {
+  const body = await c.req.parseBody()
+  const { subdomain, zip } = body
+
+  // Configure AWS SDK
+  const s3Client = new S3Client({
+    credentials: {
+      accessKeyId: c.env.AWS_S3_KEY,
+      secretAccessKey: c.env.AWS_S3_SECRET
+    }, 
+    region: c.env.AWS_S3_REGION 
+  });
+
+  const key = `${subdomain}/${zip.filename}`;
+  const params = {
+    Bucket: c.env.AWS_S3_BUCKET,
+    Key: key,
+    Body: zip
+  };
+
+  await s3Client.send(new PutObjectCommand(params));
+
+  return c.json({ success: true })
 })
 
 export default app
