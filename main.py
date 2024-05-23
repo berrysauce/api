@@ -80,14 +80,14 @@ async def calculate_decompressed_size(zip_file):
 async def get_max_depth(path):
     return path.count("/")
 
-async def is_nested_zip(file_name, zip_file):
-    with zip_file.open(file_name) as f:
-        file_like_object = BytesIO(f.read())
-        try:
-            with zipfile.ZipFile(file_like_object) as nested_zip:
-                return True
-        except zipfile.BadZipFile:
-            return False
+#async def is_nested_zip(file_name, zip_file):
+#    with zip_file.open(file_name) as f:
+#        file_like_object = BytesIO(f.read())
+#        try:
+#            with zipfile.ZipFile(file_like_object) as nested_zip:
+#                return True
+#        except zipfile.BadZipFile:
+#            return False
 
 async def get_logged_user(cookie: str = Security(APIKeyCookie(name="token"))) -> OpenID:
     # Get user's JWT stored in cookie 'token', parse it and return the user's OpenID
@@ -151,8 +151,8 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
         file_list = z.namelist()
         
         # Prevent nested zip files
-        if await is_nested_zip(file_name, z):
-            raise HTTPException(status_code=400, detail="ZIP file contains nested zip files, refer to docs.stowage.dev/upload-limits")
+        #if await is_nested_zip(file_name, z):
+        #    raise HTTPException(status_code=400, detail="ZIP file contains nested zip files, refer to docs.stowage.dev/upload-limits")
         
         # Check the total decompressed size
         total_decompressed_size = await calculate_decompressed_size(z)
