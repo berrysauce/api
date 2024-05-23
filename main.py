@@ -127,7 +127,7 @@ async def logout():
 async def post_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[UploadFile, File()], user: OpenID = Depends(get_logged_user)):
     # Move to the end of the file and get its size
     await zip.seek(0, 2)
-    file_size = zip.tell()
+    file_size = zip.file.tell()
     await zip.seek(0)  # Reset the file pointer to the beginning
     
     if file_size > MAX_FILE_SIZE:
