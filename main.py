@@ -83,7 +83,7 @@ async def get_logged_user(cookie: str = Security(APIKeyCookie(name="token"))) ->
 
 
 @app.get("/")
-def root():
+def get_root():
     return {"detail": "Stowage API"}
 
 @app.get("/api/user")
@@ -95,13 +95,13 @@ async def get_user(user: OpenID = Depends(get_logged_user)):
     }
 
 @app.get("/auth/login")
-async def auth_init():
+async def get_auth_login():
     # Initialize auth and redirect
     with sso:
         return await sso.get_login_redirect()
 
 @app.get("/auth/callback")
-async def login_callback(request: Request):
+async def get_auth_callback(request: Request):
     # Process login and redirect the user to the protected endpoint
     with sso:
         openid = await sso.verify_and_process(request)
@@ -117,14 +117,14 @@ async def login_callback(request: Request):
     return response
     
 @app.get("/auth/logout")
-async def logout():
+async def get_auth_logout():
     # Forget the user's session
     response = RedirectResponse(url="/protected")
     response.delete_cookie(key="token")
     return response
 
 @app.post("/api/deploy/zip")
-async def post_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[UploadFile, File()], user: OpenID = Depends(get_logged_user)):
+async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[UploadFile, File()], user: OpenID = Depends(get_logged_user)):
     # Move to the end of the file and get its size
     await zip.file.seek(0, os.SEEK_END)
     file_size = zip.file.tell()
