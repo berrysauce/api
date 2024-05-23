@@ -22,7 +22,7 @@ from tempfile import TemporaryFile
 load_dotenv()
 PORT = int(os.getenv("PORT"))
 CF_R2_ACCESS_KEY = os.getenv("CF_R2_ACCESS_KEY")
-CF_R2_SECRET_KEY = os.getenv("CF_R2_ACCESS_KEY")
+CF_R2_SECRET_KEY = os.getenv("CF_R2_SECRET_KEY")
 CF_R2_ACCOUNT_ID = os.getenv("CF_R2_ACCOUNT_ID")
 CF_R2_BUCKET = os.getenv("CF_R2_BUCKET")
 CF_R2_REGION = os.getenv("CF_R2_REGION")
