@@ -48,7 +48,7 @@ sso = GithubSSO(
 s3 = boto3.resource(
     "s3",
     region_name=CF_R2_REGION,
-    endpoint_url=f"https://{CF_R2_ACCOUNT_ID}.r2.cloudflarestorage.com/{CF_R2_BUCKET}",
+    endpoint_url=f"https://{CF_R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
     aws_access_key_id=CF_R2_ACCESS_KEY,
     aws_secret_access_key=CF_R2_SECRET_KEY
 )
