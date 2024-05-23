@@ -74,7 +74,7 @@ async def calculate_decompressed_size(zip_file):
 async def get_max_depth(path):
     return path.count("/")
 
-def is_nested_zip(file_name, zip_file):
+async def is_nested_zip(file_name, zip_file):
     if file_name.endswith(".zip"):
         with zip_file.open(file_name) as nested_file:
             with zipfile.ZipFile(nested_file) as nested_zip:
@@ -143,11 +143,11 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
         file_list = z.namelist()
         
         # Prevent nested ZIP files
-        if any(is_nested_zip(f, z) for f in file_list):
+        if any(await is_nested_zip(f, z) for f in file_list):
             raise HTTPException(status_code=400, detail="Nested ZIP files are not allowed, refer to docs.stowage.dev/upload-limits")
         
         # Check the total decompressed size
-        total_decompressed_size = calculate_decompressed_size(z)
+        total_decompressed_size = await calculate_decompressed_size(z)
         if total_decompressed_size > MAX_DECOMPRESSED_SIZE:
             raise HTTPException(status_code=400, detail="Decompressed file size is too large, refer to docs.stowage.dev/upload-limits")
 
@@ -156,7 +156,7 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
             raise HTTPException(status_code=400, detail="Too many files in the ZIP archive, refer to docs.stowage.dev/upload-limits")
 
         # Check the directory depth
-        if any(get_max_depth(file) > MAX_NESTED_DEPTH for file in file_list):
+        if any(await get_max_depth(file) > MAX_NESTED_DEPTH for file in file_list):
             raise HTTPException(status_code=400, detail="ZIP file contains too deeply nested directories, refer to docs.stowage.dev/upload-limits")
         
         if "index.html" not in file_list:
