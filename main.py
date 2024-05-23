@@ -79,6 +79,14 @@ async def calculate_decompressed_size(zip_file):
 async def get_max_depth(path):
     return path.count("/")
 
+async def deleteDirectory(path):
+    try:
+        s3_bucket.objects.filter(Prefix=path).delete()
+    except Exception:
+        pass
+    finally:
+        return
+
 #async def is_nested_zip(file_name, zip_file):
 #    with zip_file.open(file_name) as f:
 #        file_like_object = BytesIO(f.read())
@@ -141,6 +149,7 @@ async def get_auth_logout():
 @app.post("/api/deploy/zip")
 async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[UploadFile, File()], user: OpenID = Depends(get_logged_user)):
     if zip.size > MAX_FILE_SIZE:
+        deleteDirectory(subdomain)
         raise HTTPException(status_code=400, detail="Uploaded file is too large, refer to docs.stowage.dev/upload-limits")
     
     file_content = await zip.read()
@@ -151,23 +160,28 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
         
         # Prevent nested zip files
         #if await is_nested_zip(file_name, z):
+        #    deleteDirectory(subdomain)
         #    raise HTTPException(status_code=400, detail="ZIP file contains nested zip files, refer to docs.stowage.dev/upload-limits")
         
         # Check the total decompressed size
         total_decompressed_size = await calculate_decompressed_size(z)
         if total_decompressed_size > MAX_DECOMPRESSED_SIZE:
+            deleteDirectory(subdomain)
             raise HTTPException(status_code=400, detail="Decompressed file size is too large, refer to docs.stowage.dev/upload-limits")
 
         # Check the number of files
         if len(file_list) > MAX_FILE_COUNT:
+            deleteDirectory(subdomain)
             raise HTTPException(status_code=400, detail="Too many files in the ZIP archive, refer to docs.stowage.dev/upload-limits")
 
         # Check the directory depth
         for file in file_list:
             if await get_max_depth(file) > MAX_NESTED_DEPTH:
+                deleteDirectory(subdomain)
                 raise HTTPException(status_code=400, detail="ZIP file contains too deeply nested directories, refer to docs.stowage.dev/upload-limits")
         
         if "index.html" not in file_list:
+            deleteDirectory(subdomain)
             raise HTTPException(status_code=400, detail="The zip file must contain an 'index.html' file, refer to docs.stowage.dev/upload-limits")
         
         uploaded_files = []
@@ -178,6 +192,7 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
         
                 # Check the individual file size
                 if file_size > MAX_INDIVIDUAL_FILE_SIZE:
+                    deleteDirectory(subdomain)
                     raise HTTPException(status_code=400, detail="Uploaded file is too large, refer to docs.stowage.dev/upload-limits")
                 
                 with z.open(file_name) as f:
@@ -185,6 +200,7 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
                         continue # Skip directories
                     
                     if not await validate_file_extension(file_name):
+                        deleteDirectory(subdomain)
                         raise HTTPException(status_code=400, detail="Invalid file extension, refer to docs.stowage.dev/upload-limits")
                     
                     #extracted_content = f.read()
@@ -195,6 +211,7 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
                     uploaded_files.append(file_name)
         
         except zipfile.BadZipFile:
+            deleteDirectory(subdomain)
             raise HTTPException(status_code=400, detail="Invalid zip file")
                 
     return {"detail": "success", "user": user, "uploaded_files": uploaded_files}
