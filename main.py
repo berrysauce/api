@@ -150,9 +150,9 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
     with zipfile.ZipFile(file_like_object) as z:
         file_list = z.namelist()
         
-        # Prevent nested ZIP files
-        if any(await is_nested_zip(f, z) for f in file_list):
-            raise HTTPException(status_code=400, detail="Nested ZIP files are not allowed, refer to docs.stowage.dev/upload-limits")
+        # Prevent nested zip files
+        if await is_nested_zip(file_name, z):
+            raise HTTPException(status_code=400, detail="ZIP file contains nested zip files, refer to docs.stowage.dev/upload-limits")
         
         # Check the total decompressed size
         total_decompressed_size = await calculate_decompressed_size(z)
