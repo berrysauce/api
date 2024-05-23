@@ -188,9 +188,9 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
                     if not await validate_file_extension(file_name):
                         raise HTTPException(status_code=400, detail="Invalid file extension, refer to docs.stowage.dev/upload-limits")
                     
-                    extracted_content = f.read()
-                    content_type = mimetypes.guess_type(file_name)[0]
-                    s3_client.upload_fileobj(extracted_content, CF_R2_BUCKET, f"{subdomain}/{file_name}")
+                    #extracted_content = f.read()
+                    #content_type = mimetypes.guess_type(file_name)[0]
+                    s3_client.upload_fileobj(f, CF_R2_BUCKET, f"{subdomain}/{file_name}")
                     #s3_client.put_object(Bucket=CF_R2_BUCKET, Key=f"{subdomain}/{file_name}", Body=extracted_content, ContentType=content_type)
                     uploaded_files.append(file_name)
         
