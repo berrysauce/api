@@ -45,16 +45,15 @@ sso = GithubSSO(
     allow_insecure_http=OAUTH_ALLOW_INSECURE,
 )
 
-aws_session = boto3.Session(
-    aws_access_key_id=CF_R2_ACCESS_KEY,
-    aws_secret_access_key=CF_R2_SECRET_KEY
-)
-s3_client = aws_session.client(
+s3 = boto3.resource(
     "s3",
     region_name=CF_R2_REGION,
     endpoint_url=f"https://{CF_R2_ACCOUNT_ID}.r2.cloudflarestorage.com/{CF_R2_BUCKET}",
-    
+    aws_access_key_id=CF_R2_ACCESS_KEY,
+    aws_secret_access_key=CF_R2_SECRET_KEY
 )
+s3_bucket = s3.Bucket(CF_R2_BUCKET)
+
 mongodb_client = MongoClient(MONGODB_URI, server_api=ServerApi("1"))
 
 MAX_FILE_SIZE = 50 * 1024 * 1024 # 50MB max file size limit for uploaded ZIP files
@@ -190,7 +189,8 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
                     
                     #extracted_content = f.read()
                     #content_type = mimetypes.guess_type(file_name)[0]
-                    s3_client.upload_fileobj(f, CF_R2_BUCKET, f"{subdomain}/{file_name}")
+                    s3_bucket.Object(f"{subdomain}/{file_name}").put(Body=f.read())
+                    #s3_client.upload_fileobj(f, CF_R2_BUCKET, f"{subdomain}/{file_name}")
                     #s3_client.put_object(Bucket=CF_R2_BUCKET, Key=f"{subdomain}/{file_name}", Body=extracted_content, ContentType=content_type)
                     uploaded_files.append(file_name)
         
