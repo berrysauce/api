@@ -21,10 +21,11 @@ from tempfile import TemporaryFile
 # Environment variables
 load_dotenv()
 PORT = int(os.getenv("PORT"))
-AWS_S3_ACCESS_KEY = os.getenv("AWS_S3_ACCESS_KEY")
-AWS_S3_SECRET_KEY = os.getenv("AWS_S3_SECRET_KEY")
-AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET")
-AWS_S3_REGION = os.getenv("AWS_S3_REGION")
+CF_R2_ACCESS_KEY = os.getenv("CF_R2_ACCESS_KEY")
+CF_R2_SECRET_KEY = os.getenv("CF_R2_ACCESS_KEY")
+CF_R2_ACCOUNT_ID = os.getenv("CF_R2_ACCOUNT_ID")
+CF_R2_BUCKET = os.getenv("CF_R2_BUCKET")
+CF_R2_REGION = os.getenv("CF_R2_REGION")
 JWT_SECRET = os.getenv("JWT_SECRET")
 OAUTH_ALLOW_INSECURE = bool(os.getenv("OAUTH_ALLOW_INSECURE"))
 OAUTH_SECRET = os.getenv("OAUTH_SECRET")
@@ -45,10 +46,15 @@ sso = GithubSSO(
 )
 
 aws_session = boto3.Session(
-    aws_access_key_id=AWS_S3_ACCESS_KEY,
-    aws_secret_access_key=AWS_S3_SECRET_KEY
+    aws_access_key_id=CF_R2_ACCESS_KEY,
+    aws_secret_access_key=CF_R2_SECRET_KEY
 )
-s3_client = aws_session.client("s3")
+s3_client = aws_session.client(
+    "s3",
+    region_name=CF_R2_REGION,
+    endpoint_url=f"https://{CF_R2_ACCOUNT_ID}.r2.cloudflarestorage.com/{CF_R2_BUCKET}",
+    
+)
 mongodb_client = MongoClient(MONGODB_URI, server_api=ServerApi("1"))
 
 MAX_FILE_SIZE = 50 * 1024 * 1024 # 50MB max file size limit for uploaded ZIP files
