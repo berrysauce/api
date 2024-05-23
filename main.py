@@ -15,6 +15,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.security import APIKeyCookie
 from fastapi_sso.sso.github import GithubSSO
 from fastapi_sso.sso.base import OpenID
+from tempfile import TemporaryFile
 
 
 # Environment variables
@@ -50,8 +51,8 @@ aws_session = boto3.Session(
 s3_client = aws_session.client("s3")
 mongodb_client = MongoClient(MONGODB_URI, server_api=ServerApi("1"))
 
-# 50MB max file size limit for uploaded ZIP files
-MAX_FILE_SIZE = 50 * 1024 * 1024
+MAX_FILE_SIZE = 50 * 1024 * 1024 # 50MB max file size limit for uploaded ZIP files
+MAX_INDIVIDUAL_FILE_SIZE = 10 * 1024 * 1024  # 10 MB max file size limit for individual files
 MAX_DECOMPRESSED_SIZE = 100 * 1024 * 1024  # 100 MB total decompressed size
 MAX_FILE_COUNT = 1000  # Maximum number of files
 MAX_NESTED_DEPTH = 10  # Maximum directory depth
@@ -72,6 +73,13 @@ async def calculate_decompressed_size(zip_file):
 
 async def get_max_depth(path):
     return path.count("/")
+
+def is_nested_zip(file_name, zip_file):
+    if file_name.endswith(".zip"):
+        with zip_file.open(file_name) as nested_file:
+            with zipfile.ZipFile(nested_file) as nested_zip:
+                return any(is_nested_zip(f, nested_zip) for f in nested_zip.namelist())
+    return False
 
 async def get_logged_user(cookie: str = Security(APIKeyCookie(name="token"))) -> OpenID:
     # Get user's JWT stored in cookie 'token', parse it and return the user's OpenID
@@ -125,12 +133,7 @@ async def get_auth_logout():
 
 @app.post("/api/deploy/zip")
 async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[UploadFile, File()], user: OpenID = Depends(get_logged_user)):
-    # Move to the end of the file and get its size
-    await zip.file.seek(0, os.SEEK_END)
-    file_size = zip.file.tell()
-    await zip.file.seek(0)  # Reset the file pointer to the beginning
-    
-    if file_size > MAX_FILE_SIZE:
+    if zip.size > MAX_FILE_SIZE:
         raise HTTPException(status_code=400, detail="Uploaded file is too large, refer to docs.stowage.dev/upload-limits")
     
     file_content = await zip.read()
@@ -138,6 +141,10 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
     
     with zipfile.ZipFile(file_like_object) as z:
         file_list = z.namelist()
+        
+        # Prevent nested ZIP files
+        if any(is_nested_zip(f, z) for f in file_list):
+            raise HTTPException(status_code=400, detail="Nested ZIP files are not allowed, refer to docs.stowage.dev/upload-limits")
         
         # Check the total decompressed size
         total_decompressed_size = calculate_decompressed_size(z)
@@ -159,6 +166,11 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
         
         try:
             for file_name in file_list:
+                file_size = z.getinfo(file_name).file_size
+        
+                if file_size > MAX_INDIVIDUAL_FILE_SIZE:
+                    raise HTTPException(status_code=400, detail="Uploaded file is too large, refer to docs.stowage.dev/upload-limits")
+                
                 with z.open(file_name) as f:
                     if file_name.endswith("/"):
                         continue # Skip directories
