@@ -126,9 +126,9 @@ async def logout():
 @app.post("/api/deploy/zip")
 async def post_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[UploadFile, File()], user: OpenID = Depends(get_logged_user)):
     # Move to the end of the file and get its size
-    await zip.seek(0, 2)
+    await zip.file.seek(0, os.SEEK_END)
     file_size = zip.file.tell()
-    await zip.seek(0)  # Reset the file pointer to the beginning
+    await zip.file.seek(0)  # Reset the file pointer to the beginning
     
     if file_size > MAX_FILE_SIZE:
         raise HTTPException(status_code=400, detail="Uploaded file is too large, refer to docs.stowage.dev/upload-limits")
