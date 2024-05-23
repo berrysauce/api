@@ -164,8 +164,9 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
             raise HTTPException(status_code=400, detail="Too many files in the ZIP archive, refer to docs.stowage.dev/upload-limits")
 
         # Check the directory depth
-        if any(await get_max_depth(file) > MAX_NESTED_DEPTH for file in file_list):
-            raise HTTPException(status_code=400, detail="ZIP file contains too deeply nested directories, refer to docs.stowage.dev/upload-limits")
+        for file in file_list:
+            if await get_max_depth(file) > MAX_NESTED_DEPTH:
+                raise HTTPException(status_code=400, detail="ZIP file contains too deeply nested directories, refer to docs.stowage.dev/upload-limits")
         
         if "index.html" not in file_list:
             raise HTTPException(status_code=400, detail="The zip file must contain an 'index.html' file, refer to docs.stowage.dev/upload-limits")
@@ -176,6 +177,7 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
             for file_name in file_list:
                 file_size = z.getinfo(file_name).file_size
         
+                # Check the individual file size
                 if file_size > MAX_INDIVIDUAL_FILE_SIZE:
                     raise HTTPException(status_code=400, detail="Uploaded file is too large, refer to docs.stowage.dev/upload-limits")
                 
