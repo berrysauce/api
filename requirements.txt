@@ -1,8 +1,9 @@
 uvicorn
+hypercorn
 fastapi
 boto3
 python-multipart
 python-dotenv
 pymongo[srv]
 fastapi-sso
-hypercorn
+python-jose[cryptography] 

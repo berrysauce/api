@@ -2,14 +2,19 @@ import os
 import boto3
 import zipfile
 import uvicorn
+import datetime
 import mimetypes
+from jose import jwt
 from io import BytesIO
 from dotenv import load_dotenv
 from typing import Annotated
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
-from fastapi import FastAPI, Form, File, UploadFile, Request
+from fastapi import FastAPI, Form, File, UploadFile, Request, Security, HTTPException, Depends
+from fastapi.responses import RedirectResponse
+from fastapi.security import APIKeyCookie
 from fastapi_sso.sso.github import GithubSSO
+from fastapi_sso.sso.base import OpenID
 
 
 # Environment variables
@@ -19,6 +24,8 @@ AWS_S3_ACCESS_KEY = os.getenv("AWS_S3_ACCESS_KEY")
 AWS_S3_SECRET_KEY = os.getenv("AWS_S3_SECRET_KEY")
 AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET")
 AWS_S3_REGION = os.getenv("AWS_S3_REGION")
+JWT_SECRET = os.getenv("JWT_SECRET")
+OAUTH_ALLOW_INSECURE = bool(os.getenv("OAUTH_ALLOW_INSECURE"))
 OAUTH_SECRET = os.getenv("OAUTH_SECRET")
 OAUTH_GH_CLIENT_ID = os.getenv("OAUTH_GH_CLIENT_ID")
 OAUTH_GH_CLIENT_SECRET = os.getenv("OAUTH_GH_CLIENT_SECRET")
@@ -33,7 +40,7 @@ sso = GithubSSO(
     client_id=OAUTH_GH_CLIENT_ID,
     client_secret=OAUTH_GH_CLIENT_SECRET,
     redirect_uri="https://api.stowage.dev/auth/callback",
-    allow_insecure_http=True,
+    allow_insecure_http=OAUTH_ALLOW_INSECURE,
 )
 
 aws_session = boto3.Session(
@@ -43,30 +50,59 @@ aws_session = boto3.Session(
 s3_client = aws_session.client("s3")
 mongodb_client = MongoClient(MONGODB_URI, server_api=ServerApi("1"))
 
+
+async def get_logged_user(cookie: str = Security(APIKeyCookie(name="token"))) -> OpenID:
+    # Get user's JWT stored in cookie 'token', parse it and return the user's OpenID
+    try:
+        claims = jwt.decode(cookie, key=JWT_SECRET, algorithms=["HS256"])
+        return OpenID(**claims["pld"])
+    except Exception as error:
+        raise HTTPException(status_code=401, detail="Invalid authentication credentials") from error
+
+
 @app.get("/")
 def root():
-    try:
-        mongodb_client.admin.command('ping')
-        print("Pinged your deployment. You successfully connected to MongoDB!")
-    except Exception as e:
-        print(e)
     return {"msg": "Stowage API"}
+
+@app.get("/protected")
+async def protected_endpoint(user: OpenID = Depends(get_logged_user)):
+    # This endpoint will say hello to the logged user
+    # If the user is not logged, it will return a 401 error from 'get_logged_user'
+    return {
+        "message": f"You are very welcome, {user.email}!",
+    }
 
 @app.get("/auth/login")
 async def auth_init():
-    """Initialize auth and redirect"""
+    # Initialize auth and redirect
     with sso:
         return await sso.get_login_redirect()
 
 @app.get("/auth/callback")
-async def auth_callback(request: Request):
-    """Verify login"""
+async def login_callback(request: Request):
+    # Process login and redirect the user to the protected endpoint
     with sso:
-        user = await sso.verify_and_process(request)
-        return user
+        openid = await sso.verify_and_process(request)
+        if not openid:
+            raise HTTPException(status_code=401, detail="Authentication failed")
+    # Create a JWT with the user's OpenID
+    expiration = datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(days=1)
+    token = jwt.encode({"pld": openid.model_dump(), "exp": expiration, "sub": openid.id}, key=JWT_SECRET, algorithm="HS256")
+    response = RedirectResponse(url="/protected")
+    response.set_cookie(
+        key="token", value=token, expires=expiration
+    )  # This cookie will make sure /protected knows the user
+    return response
+    
+@app.get("/auth/logout")
+async def logout():
+    # Forget the user's session
+    response = RedirectResponse(url="/protected")
+    response.delete_cookie(key="token")
+    return response
 
 @app.post("/api/deploy/zip")
-async def post_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[UploadFile, File()]):
+async def post_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[UploadFile, File()], user: OpenID = Depends(get_logged_user)):
     file_content = await zip.read()
     file_like_object = BytesIO(file_content)
     
@@ -84,7 +120,7 @@ async def post_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[Uplo
                 s3_client.put_object(Bucket=AWS_S3_BUCKET, Key=f"{subdomain}/{file_name}", Body=extracted_content, ContentType=content_type)
                 uploaded_files.append(file_name)
                 
-    return {"msg": "success", "uploaded_files": uploaded_files}
+    return {"msg": "success", "user": user, "uploaded_files": uploaded_files}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
