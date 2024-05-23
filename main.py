@@ -81,11 +81,13 @@ async def get_max_depth(path):
     return path.count("/")
 
 async def is_nested_zip(file_name, zip_file):
-    if file_name.endswith(".zip"):
-        with zip_file.open(file_name) as nested_file:
-            with zipfile.ZipFile(nested_file) as nested_zip:
-                return any(is_nested_zip(f, nested_zip) for f in nested_zip.namelist())
-    return False
+    with zip_file.open(file_name) as f:
+        file_like_object = BytesIO(f.read())
+        try:
+            with zipfile.ZipFile(file_like_object) as nested_zip:
+                return True
+        except zipfile.BadZipFile:
+            return False
 
 async def get_logged_user(cookie: str = Security(APIKeyCookie(name="token"))) -> OpenID:
     # Get user's JWT stored in cookie 'token', parse it and return the user's OpenID
