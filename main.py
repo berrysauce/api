@@ -14,6 +14,7 @@ from fastapi_sso.sso.github import GithubSSO
 
 # Environment variables
 load_dotenv()
+PORT = int(os.getenv("PORT"))
 AWS_S3_ACCESS_KEY = os.getenv("AWS_S3_ACCESS_KEY")
 AWS_S3_SECRET_KEY = os.getenv("AWS_S3_SECRET_KEY")
 AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET")
@@ -85,6 +86,5 @@ async def post_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[Uplo
                 
     return {"msg": "success", "uploaded_files": uploaded_files}
 
-
 if __name__ == "__main__":
-    uvicorn.run(app, host="localhost", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
