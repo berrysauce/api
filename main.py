@@ -69,7 +69,7 @@ async def protected_endpoint(user: OpenID = Depends(get_logged_user)):
     # This endpoint will say hello to the logged user
     # If the user is not logged, it will return a 401 error from 'get_logged_user'
     return {
-        "message": f"You are very welcome, {user.email}!",
+        "detail": f"You are very welcome, {user.email}!",
     }
 
 @app.get("/auth/login")
@@ -120,7 +120,7 @@ async def post_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[Uplo
                 s3_client.put_object(Bucket=AWS_S3_BUCKET, Key=f"{subdomain}/{file_name}", Body=extracted_content, ContentType=content_type)
                 uploaded_files.append(file_name)
                 
-    return {"msg": "success", "user": user, "uploaded_files": uploaded_files}
+    return {"detail": "success", "user": user, "uploaded_files": uploaded_files}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
