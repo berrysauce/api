@@ -62,7 +62,7 @@ async def get_logged_user(cookie: str = Security(APIKeyCookie(name="token"))) ->
 
 @app.get("/")
 def root():
-    return {"msg": "Stowage API"}
+    return {"detail": "Stowage API"}
 
 @app.get("/protected")
 async def protected_endpoint(user: OpenID = Depends(get_logged_user)):
