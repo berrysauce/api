@@ -190,7 +190,8 @@ async def post_api_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[
                     
                     extracted_content = f.read()
                     content_type = mimetypes.guess_type(file_name)[0]
-                    s3_client.put_object(Bucket=CF_R2_BUCKET, Key=f"{subdomain}/{file_name}", Body=extracted_content, ContentType=content_type)
+                    s3_client.upload_fileobj(extracted_content, CF_R2_BUCKET, f"{subdomain}/{file_name}")
+                    #s3_client.put_object(Bucket=CF_R2_BUCKET, Key=f"{subdomain}/{file_name}", Body=extracted_content, ContentType=content_type)
                     uploaded_files.append(file_name)
         
         except zipfile.BadZipFile:
