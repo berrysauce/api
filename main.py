@@ -50,6 +50,28 @@ aws_session = boto3.Session(
 s3_client = aws_session.client("s3")
 mongodb_client = MongoClient(MONGODB_URI, server_api=ServerApi("1"))
 
+# 50MB max file size limit for uploaded ZIP files
+MAX_FILE_SIZE = 50 * 1024 * 1024
+MAX_DECOMPRESSED_SIZE = 100 * 1024 * 1024  # 100 MB total decompressed size
+MAX_FILE_COUNT = 1000  # Maximum number of files
+MAX_NESTED_DEPTH = 10  # Maximum directory depth
+# list with allowed file extensions for static site hosting
+ALLOWED_EXTENSIONS = [".html", ".css", ".js", ".ts", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".ico",
+                      ".bmp", ".tiff", ".woff", ".woff2", ".eot", ".ttf", ".otf", ".mp3", ".webm", ".ogg", ".mp4",
+                      ".wav", ".mov", ".pdf", ".csv", ".json", ".xml", ".yaml", ".yml", ".md", ".txt", "webmanifest"]
+
+async def validate_file_extension(filename):
+    ext = os.path.splitext(filename)[1].lower()
+    return ext in ALLOWED_EXTENSIONS
+
+async def calculate_decompressed_size(zip_file):
+    total_size = 0
+    for file_info in zip_file.infolist():
+        total_size += file_info.file_size
+    return total_size
+
+async def get_max_depth(path):
+    return path.count("/")
 
 async def get_logged_user(cookie: str = Security(APIKeyCookie(name="token"))) -> OpenID:
     # Get user's JWT stored in cookie 'token', parse it and return the user's OpenID
@@ -64,8 +86,8 @@ async def get_logged_user(cookie: str = Security(APIKeyCookie(name="token"))) ->
 def root():
     return {"detail": "Stowage API"}
 
-@app.get("/protected")
-async def protected_endpoint(user: OpenID = Depends(get_logged_user)):
+@app.get("/api/user")
+async def get_user(user: OpenID = Depends(get_logged_user)):
     # This endpoint will say hello to the logged user
     # If the user is not logged, it will return a 401 error from 'get_logged_user'
     return {
@@ -103,24 +125,55 @@ async def logout():
 
 @app.post("/api/deploy/zip")
 async def post_deploy_zip(subdomain: Annotated[str, Form()], zip: Annotated[UploadFile, File()], user: OpenID = Depends(get_logged_user)):
+    file_size = await zip.seek(0, os.SEEK_END)
+    await zip.seek(0)  # Reset the file pointer to the beginning
+    
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="Uploaded file is too large, refer to docs.stowage.dev/upload-limits")
+    
     file_content = await zip.read()
     file_like_object = BytesIO(file_content)
     
     with zipfile.ZipFile(file_like_object) as z:
         file_list = z.namelist()
+        
+        # Check the total decompressed size
+        total_decompressed_size = calculate_decompressed_size(z)
+        if total_decompressed_size > MAX_DECOMPRESSED_SIZE:
+            raise HTTPException(status_code=400, detail="Decompressed file size is too large, refer to docs.stowage.dev/upload-limits")
+
+        # Check the number of files
+        if len(file_list) > MAX_FILE_COUNT:
+            raise HTTPException(status_code=400, detail="Too many files in the ZIP archive, refer to docs.stowage.dev/upload-limits")
+
+        # Check the directory depth
+        if any(get_max_depth(file) > MAX_NESTED_DEPTH for file in file_list):
+            raise HTTPException(status_code=400, detail="ZIP file contains too deeply nested directories, refer to docs.stowage.dev/upload-limits")
+        
+        if "index.html" not in file_list:
+            raise HTTPException(status_code=400, detail="The zip file must contain an 'index.html' file, refer to docs.stowage.dev/upload-limits")
+        
         uploaded_files = []
         
-        for file_name in file_list:
-            with z.open(file_name) as f:
-                if file_name.endswith("/"):
-                    continue # Skip directories
-                
-                extracted_content = f.read()
-                content_type = mimetypes.guess_type(file_name)[0]
-                s3_client.put_object(Bucket=AWS_S3_BUCKET, Key=f"{subdomain}/{file_name}", Body=extracted_content, ContentType=content_type)
-                uploaded_files.append(file_name)
+        try:
+            for file_name in file_list:
+                with z.open(file_name) as f:
+                    if file_name.endswith("/"):
+                        continue # Skip directories
+                    
+                    if not await validate_file_extension(file_name):
+                        raise HTTPException(status_code=400, detail="Invalid file extension, refer to docs.stowage.dev/upload-limits")
+                    
+                    extracted_content = f.read()
+                    content_type = mimetypes.guess_type(file_name)[0]
+                    s3_client.put_object(Bucket=AWS_S3_BUCKET, Key=f"{subdomain}/{file_name}", Body=extracted_content, ContentType=content_type)
+                    uploaded_files.append(file_name)
+        
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=400, detail="Invalid zip file")
                 
     return {"detail": "success", "user": user, "uploaded_files": uploaded_files}
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
