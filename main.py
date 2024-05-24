@@ -29,6 +29,7 @@ CF_R2_REGION = os.getenv("CF_R2_REGION")
 JWT_SECRET = os.getenv("JWT_SECRET")
 OAUTH_ALLOW_INSECURE = bool(os.getenv("OAUTH_ALLOW_INSECURE"))
 OAUTH_SECRET = os.getenv("OAUTH_SECRET")
+OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI")
 OAUTH_GH_CLIENT_ID = os.getenv("OAUTH_GH_CLIENT_ID")
 OAUTH_GH_CLIENT_SECRET = os.getenv("OAUTH_GH_CLIENT_SECRET")
 MONGODB_USER = os.getenv("MONGODB_USER")
@@ -42,7 +43,7 @@ app = FastAPI()
 sso = GithubSSO(
     client_id=OAUTH_GH_CLIENT_ID,
     client_secret=OAUTH_GH_CLIENT_SECRET,
-    redirect_uri="https://api.stowage.dev/auth/callback",
+    redirect_uri=OAUTH_REDIRECT_URI,
     allow_insecure_http=OAUTH_ALLOW_INSECURE,
 )
 
@@ -129,49 +130,73 @@ async def get_user(user: OpenID = Depends(get_logged_user)):
     }
 
 @app.get("/auth/login")
-async def get_auth_login(aid: str):
-    # Create database entry for auth id with TTL
-    if not is_valid_uuid(aid):
-        raise HTTPException(status_code=400, detail="Invalid auth id (aid)")
+async def get_auth_login(state: str, request: Request):
+    # https://staging-api.stowage.dev/auth/callback?error=redirect_uri_mismatch&error_description=The+redirect_uri+MUST+match+the+registered+callback+URL+for+this+application.&error_uri=https%3A%2F%2Fdocs.github.com%2Fapps%2Fmanaging-oauth-apps%2Ftroubleshooting-authorization-request-errors%2F%23redirect-uri-mismatch&state=21d455f9-27f1-4bc7-b354-8009d4ccabe9
     
-    try:
-        auth_data = {
-            "aid": aid, 
-            "status": "created", 
-            "provider": "github",
-            "provider_data": {},
-            "created_at": datetime.datetime.now(), 
-            "expires_at": datetime.datetime.now() + datetime.timedelta(minutes=5)
-        }
-        db_res = auth_db.insert_one(auth_data)
-    except:
-        raise HTTPException(status_code=500, detail="Failed to initialize authentication")
+    # Create database entry for auth id (state) with TTL
+    # The state is a UUID that will be used to identify the authentication process
+    # It is referenced in the callback endpoint to update the authentication status
+    if not is_valid_uuid(state):
+        raise HTTPException(status_code=400, detail="Invalid auth id (state)")
+    
+    #try:
+    auth_data = {
+        "state": state, 
+        "status": "pending", 
+        "provider": "github",
+        "provider_data": {},
+        "created_at": datetime.datetime.now(), 
+        "expires_at": datetime.datetime.now() + datetime.timedelta(minutes=5)
+    }
+    db_res = auth_db.insert_one(auth_data)
+    #except:
+    #    raise HTTPException(status_code=500, detail="Failed to initialize authentication")
     
     # Initialize auth and redirect
     with sso:
-        return await sso.get_login_redirect(params={aid: aid})
+        return await sso.get_login_redirect(state=state)
 
 @app.get("/auth/callback")
-async def get_auth_callback(aid: str, request: Request):
+async def get_auth_callback(state: str, request: Request):
     # Process login and redirect the user to the protected endpoint
     with sso:
         openid = await sso.verify_and_process(request)
         if not openid:
             # Update authentication status
-            db_res = auth_db.find_one_and_update(filter={"aid": aid}, update={"status": "failed"})
+            db_res = auth_db.find_one_and_update(filter={"state": state}, update={"status": "failed"})
             raise HTTPException(status_code=401, detail="Authentication failed")
         
     # Update authentication status
-    db_res = auth_db.find_one_and_update(filter={"aid": aid}, update={"status": "success", "provider_data": openid.model_dump()})
+    # The state is a UUID which comes from the login endpoint
+    db_res = auth_db.find_one_and_update(
+        filter={"state": state},
+        update={"$set": {"status": "success", "provider_data": openid.model_dump()}}
+    )
     
     # Create a JWT with the user's OpenID
     expiration = datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(days=1)
     token = jwt.encode({"pld": openid.model_dump(), "exp": expiration, "sub": openid.id}, key=JWT_SECRET, algorithm="HS256")
-    response = RedirectResponse(url="/protected")
+    response = RedirectResponse(url="/api")
     response.set_cookie(
         key="token", value=token, expires=expiration
-    )  # This cookie will make sure /protected knows the user
+    )  # This cookie will make sure /api knows the user
     return response
+
+@app.get("/auth/status")
+async def get_auth_status(state: str):
+    # Check the authentication status
+    db_res = auth_db.find_one({"state": state})
+    
+    if not db_res:
+        raise HTTPException(status_code=404, detail="Authentication not found")
+    elif db_res["status"] == "pending":
+        return {"detail": "Authentication in progress", "status": "pending"}
+    elif db_res["status"] == "failed":
+        raise HTTPException(status_code=401, detail="Authentication failed")
+    elif db_res["status"] == "success":
+        return {"detail": "Authentication successful", "status": "success", "user": db_res["provider_data"]}
+    else:
+        raise HTTPException(status_code=500, detail="Authentication status unknown")
     
 @app.get("/auth/logout")
 async def get_auth_logout():
