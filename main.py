@@ -1,4 +1,5 @@
 import os
+import uuid
 import boto3
 import zipfile
 import uvicorn
@@ -15,7 +16,6 @@ from fastapi.responses import RedirectResponse
 from fastapi.security import APIKeyCookie
 from fastapi_sso.sso.github import GithubSSO
 from fastapi_sso.sso.base import OpenID
-from tempfile import TemporaryFile
 
 
 # Environment variables
@@ -33,7 +33,8 @@ OAUTH_GH_CLIENT_ID = os.getenv("OAUTH_GH_CLIENT_ID")
 OAUTH_GH_CLIENT_SECRET = os.getenv("OAUTH_GH_CLIENT_SECRET")
 MONGODB_USER = os.getenv("MONGODB_USER")
 MONGODB_PASSWORD = os.getenv("MONGODB_PASSWORD")
-MONGODB_URI = f"mongodb+srv://{MONGODB_USER}:{MONGODB_PASSWORD}@stowageserverless.jqe5vea.mongodb.net/?retryWrites=true&w=majority&appName=StowageServerless"
+MONGODB_CONNECTION = os.getenv("MONGODB_CONNECTION")
+MONGODB_URI = f"mongodb+srv://{MONGODB_USER}:{MONGODB_PASSWORD}@{MONGODB_CONNECTION}"
 
 
 app = FastAPI()
@@ -55,6 +56,9 @@ s3 = boto3.resource(
 s3_bucket = s3.Bucket(CF_R2_BUCKET)
 
 mongodb_client = MongoClient(MONGODB_URI, server_api=ServerApi("1"))
+auth_db = mongodb_client["users"]["auth"]
+user_db = mongodb_client["users"]["data"]
+sites_db = mongodb_client["sites"]["data"]
 
 MAX_FILE_SIZE = 50 * 1024 * 1024 # 50MB max file size limit for uploaded ZIP files
 MAX_INDIVIDUAL_FILE_SIZE = 10 * 1024 * 1024  # 10 MB max file size limit for individual files
@@ -96,6 +100,13 @@ async def deleteDirectory(path):
 #        except zipfile.BadZipFile:
 #            return False
 
+def is_valid_uuid(string):
+    try:
+        uuid.UUID(str(string))
+        return True
+    except ValueError:
+        return False
+
 async def get_logged_user(cookie: str = Security(APIKeyCookie(name="token"))) -> OpenID:
     # Get user's JWT stored in cookie 'token', parse it and return the user's OpenID
     try:
@@ -118,18 +129,41 @@ async def get_user(user: OpenID = Depends(get_logged_user)):
     }
 
 @app.get("/auth/login")
-async def get_auth_login():
+async def get_auth_login(aid: str):
+    # Create database entry for auth id with TTL
+    if not is_valid_uuid(aid):
+        raise HTTPException(status_code=400, detail="Invalid auth id (aid)")
+    
+    try:
+        auth_data = {
+            "aid": aid, 
+            "status": "created", 
+            "provider": "github",
+            "provider_data": {},
+            "created_at": datetime.datetime.now(), 
+            "expires_at": datetime.datetime.now() + datetime.timedelta(minutes=5)
+        }
+        db_res = auth_db.insert_one(auth_data)
+    except:
+        raise HTTPException(status_code=500, detail="Failed to initialize authentication")
+    
     # Initialize auth and redirect
     with sso:
-        return await sso.get_login_redirect()
+        return await sso.get_login_redirect(params={aid: aid})
 
 @app.get("/auth/callback")
-async def get_auth_callback(request: Request):
+async def get_auth_callback(aid: str, request: Request):
     # Process login and redirect the user to the protected endpoint
     with sso:
         openid = await sso.verify_and_process(request)
         if not openid:
+            # Update authentication status
+            db_res = auth_db.find_one_and_update(filter={"aid": aid}, update={"status": "failed"})
             raise HTTPException(status_code=401, detail="Authentication failed")
+        
+    # Update authentication status
+    db_res = auth_db.find_one_and_update(filter={"aid": aid}, update={"status": "success", "provider_data": openid.model_dump()})
+    
     # Create a JWT with the user's OpenID
     expiration = datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(days=1)
     token = jwt.encode({"pld": openid.model_dump(), "exp": expiration, "sub": openid.id}, key=JWT_SECRET, algorithm="HS256")
